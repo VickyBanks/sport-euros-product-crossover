@@ -97,7 +97,7 @@ SELECT distinct audience_id,
 FROM audience.audience_activity_daily_summary_enriched
 WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates);
 
-SELECT count(distinct audience_id) FROM vb_euros_all_users;--2,942,210
+SELECT count(distinct audience_id) FROM vb_euros_all_users;--21,024,659
 
 --- Who is in which group?
 DROP TABLE IF EXISTS vb_euros_crossover;
@@ -118,6 +118,7 @@ FROM all_hids a
          LEFT JOIN sport d on a.audience_id = d.audience_id
 ORDER BY a.audience_id
 ;
+--Categorise users based on the products they use
 ALTER TABLE  vb_euros_crossover
     add products_used varchar(40);
 UPDATE vb_euros_crossover
@@ -131,9 +132,14 @@ set products_used = CASE
                         WHEN sport = FALSE AND iplayer = FALSE AND sounds = TRUE THEN '7_sounds_only'
                         ELSE '8'
     END;
-SELECT *  FROM vb_euros_crossover limit 10;
+-- Check product split
+SELECT products_used, count(distinct audience_id) FROM vb_euros_crossover GROUP BY 1 ORDER BY 1;
+--Remove people who went to no product
+DELETE FROM vb_euros_crossover WHERE products_used = '8';
 
-SELECT distinct age_group FROM vb_euros_crossover;
+SELECT *  FROM vb_euros_crossover ORDER BY audience_id limit 10;
+
+SELECT count(distinct audience_id) FROM vb_euros_crossover;--7,405,657
 
 -- See what combination of products are used for people who consumed Euros on at least one platform
 SELECT products_used,
@@ -203,8 +209,16 @@ SELECT distinct date_of_event FROM audience.audience_activity_daily_summary_enri
 WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates);
 
 --- Find the top items for users in each group
-SELECT * FROM vb_euros_crossover limit 10;
 
+SELECT a.products_used,b.programme_title as iplayer_title, count(distinct a.audience_id) as users
+FROM vb_euros_crossover a
+         LEFT JOIN vb_euros_iplayer b on a.audience_id = b.audience_id
+WHERE products_used = '2_sport_iplayer'
+GROUP BY 1,2
+ORDER BY users DESC;
+
+
+SELECT count(*) FROM vb_euros_crossover;
 
 
 
