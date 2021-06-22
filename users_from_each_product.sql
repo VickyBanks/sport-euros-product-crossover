@@ -18,7 +18,8 @@ SELECT DISTINCT audience_id,
                     WHEN age_range IN ('16-19', '20-24', '25-29', '30-34') THEN '16 to 34'
                     WHEN age_range IN ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                         THEN 'Over 35'
-                    ELSE NULL END AS age_group
+                    ELSE NULL END AS age_group,
+                programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE destination = 'PS_IPLAYER'
   AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
@@ -26,7 +27,7 @@ WHERE destination = 'PS_IPLAYER'
   AND pips_genre_level_1_names ILIKE 'Sport%'
   AND programme_title ILIKE '%Euro 2020%'
 ;
-SELECT count(*) FROM vb_euros_iplayer;--5,261,821
+SELECT count(distinct audience_id) FROM vb_euros_iplayer;--5,261,821
 
 --- Users going to iPlayer and visiting euros content
 DROP TABLE IF EXISTS vb_euros_sounds;
@@ -37,7 +38,8 @@ SELECT DISTINCT audience_id,
            WHEN age_range IN ('16-19', '20-24', '25-29', '30-34') THEN '16 to 34'
            WHEN age_range IN ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                THEN 'Over 35'
-           ELSE NULL END AS age_group
+           ELSE NULL END AS age_group,
+                programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE destination = 'PS_SOUNDS'
   AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
@@ -51,7 +53,7 @@ WHERE destination = 'PS_SOUNDS'
   AND programme_title NOT ILIKE '%Women’s Euro 2022%'
   AND pips_genre_level_1_names ILIKE '%Sport%'
 ;
-SELECT count(*) FROM vb_euros_sounds;-- 519,482
+SELECT count(distinct audience_id) FROM vb_euros_sounds;-- 519,482
 
 
 
@@ -64,7 +66,8 @@ SELECT DISTINCT audience_id,
                     WHEN age_range IN ('16-19', '20-24', '25-29', '30-34') THEN '16 to 34'
                     WHEN age_range IN ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                         THEN 'Over 35'
-                    ELSE NULL END AS age_group
+                    ELSE NULL END AS age_group,
+                programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE destination = 'PS_SPORT'
   AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
@@ -77,7 +80,7 @@ WHERE destination = 'PS_SPORT'
   AND episode_title NOT ILIKE '%European%'
   AND pips_genre_level_1_names ILIKE '%Sport%'
 ;
-SELECT count(*) FROM vb_euros_sport;--2,942,245
+SELECT count(distinct audience_id) FROM vb_euros_sport;--2,942,210
 
 -- Get all users seen to join all the others onto
 DROP TABLE IF EXISTS vb_euros_all_users;
@@ -89,20 +92,22 @@ SELECT distinct audience_id,
                     WHEN age_range IN
                          ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                         THEN 'Over 35'
-                    ELSE NULL END AS age_group
+                    ELSE NULL END AS age_group,
+                programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates);
 
-SELECT count(*) FROM vb_euros_all_users;
+SELECT count(distinct audience_id) FROM vb_euros_all_users;--2,942,210
 
 --- Who is in which group?
 DROP TABLE IF EXISTS vb_euros_crossover;
 CREATE TABLE vb_euros_crossover AS
-with all_hids as (SELECT * FROM vb_euros_all_users),
-     iplayer as (SELECT *, cast(1 as boolean) as iplayer FROM vb_euros_iplayer),
-     sounds as (SELECT *, cast(1 as boolean) as sounds FROM vb_euros_sounds),
-     sport as (SELECT *, cast(1 as boolean) as sport FROM vb_euros_sport)
-SELECT a.audience_id,
+with all_hids as (SELECT distinct audience_id, age_group FROM vb_euros_all_users),
+     iplayer as (SELECT distinct audience_id, cast(1 as boolean) as iplayer FROM vb_euros_iplayer),
+     sounds as (SELECT distinct audience_id, cast(1 as boolean) as sounds FROM vb_euros_sounds),
+     sport as (SELECT distinct audience_id, cast(1 as boolean) as sport FROM vb_euros_sport)
+SELECT
+       a.audience_id,
        a.age_group,
        isnull(iplayer,FALSE) as iplayer,
        isnull(sounds,FALSE) as sounds,
@@ -113,18 +118,25 @@ FROM all_hids a
          LEFT JOIN sport d on a.audience_id = d.audience_id
 ORDER BY a.audience_id
 ;
+ALTER TABLE  vb_euros_crossover
+    add products_used varchar(40);
+UPDATE vb_euros_crossover
+set products_used = CASE
+                        WHEN sport = TRUE AND iplayer = TRUE AND sounds = TRUE THEN '1_all'
+                        WHEN sport = TRUE AND iplayer = TRUE AND sounds = FALSE THEN '2_sport_iplayer'
+                        WHEN sport = TRUE AND iplayer = FALSE AND sounds = TRUE THEN '3_sport_sounds'
+                        WHEN sport = FALSE AND iplayer = TRUE AND sounds = TRUE THEN '4_iplayer_sounds'
+                        WHEN sport = TRUE AND iplayer = FALSE AND sounds = FALSE THEN '5_sport_only'
+                        WHEN sport = FALSE AND iplayer = TRUE AND sounds = FALSE THEN '6_iplayer_only'
+                        WHEN sport = FALSE AND iplayer = FALSE AND sounds = TRUE THEN '7_sounds_only'
+                        ELSE '8'
+    END;
+SELECT *  FROM vb_euros_crossover limit 10;
+
 SELECT distinct age_group FROM vb_euros_crossover;
+
 -- See what combination of products are used for people who consumed Euros on at least one platform
-SELECT CASE
-           WHEN sport = TRUE AND iplayer = TRUE AND sounds = TRUE THEN '1_all'
-           WHEN sport = TRUE AND iplayer = TRUE AND sounds = FALSE THEN '2_sport_iplayer'
-           WHEN sport = TRUE AND iplayer = FALSE AND sounds = TRUE THEN '3_sport_sounds'
-           WHEN sport = FALSE AND iplayer = TRUE AND sounds = TRUE THEN '4_iplayer_sounds'
-           WHEN sport = TRUE AND iplayer = FALSE AND sounds = FALSE THEN '5_sport_only'
-           WHEN sport = FALSE AND iplayer = TRUE AND sounds = FALSE THEN '6_iplayer_only'
-           WHEN sport = FALSE AND iplayer = FALSE AND sounds = TRUE THEN '7_sounds_only'
-           ELSE '8'
-           END                     as product_order,
+SELECT products_used,
        sport,
        iplayer,
        sounds,
@@ -139,13 +151,13 @@ WHERE (iplayer = TRUE
    or sport = TRUE)
 AND age_group = '16 to 34'
 GROUP BY 1, 2, 3, 4
-ORDER BY product_order
+ORDER BY products_used
 ;
 
 -- Check what the split is for all users, not just those to the euros content
 DROP TABLE IF EXISTS vb_euros_crossover_test;
 CREATE TABLE vb_euros_crossover_test AS
-with all_hids as (SELECT * FROM vb_euros_all_users),
+with all_hids as (SELECT distinct audience_id, age_group FROM vb_euros_all_users),
      iplayer as (SELECT distinct audience_id, cast(1 as boolean) as iplayer FROM audience.audience_activity_daily_summary_enriched WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates) and destination = 'PS_IPLAYER'),
      sounds as (SELECT distinct audience_id, cast(1 as boolean) as sounds FROM audience.audience_activity_daily_summary_enriched WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates) and destination = 'PS_SOUNDS'),
      sport as (SELECT distinct audience_id, cast(1 as boolean) as sport FROM audience.audience_activity_daily_summary_enriched WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates) and destination = 'PS_SPORT')
@@ -186,3 +198,18 @@ AND age_group = '16 to 34'
 GROUP BY 1, 2, 3, 4
 ORDER BY product_order
 ;
+
+SELECT distinct date_of_event FROM audience.audience_activity_daily_summary_enriched
+WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates);
+
+--- Find the top items for users in each group
+SELECT * FROM vb_euros_crossover limit 10;
+
+
+
+
+-- What content cross overs
+--people in group 1 watch/read/list to X top 10
+
+
+-- FA Cup 2021 - We want to include the date range 10th May - 16th May
