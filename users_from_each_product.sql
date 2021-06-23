@@ -18,18 +18,21 @@ SELECT DISTINCT audience_id,
                     WHEN age_range IN ('16-19', '20-24', '25-29', '30-34') THEN '16 to 34'
                     WHEN age_range IN ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                         THEN 'Over 35'
-                    ELSE NULL END AS age_group,
-                programme_title
+                    ELSE NULL END                         AS age_group,
+                CASE WHEN programme_title!= episode_title THEN programme_title || ' - ' || episode_title  ELSE programme_title END as programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE destination = 'PS_IPLAYER'
   AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
   AND LENGTH(audience_id) = 43
   AND pips_genre_level_1_names ILIKE 'Sport%'
-  AND programme_title ILIKE '%Euro 2020%'
+  AND (programme_title ILIKE '%Euro 2020%' OR programme_title = 'Cristiano Ronaldo: Impossible to Ignore' OR
+       programme_title = 'Roberto Martinez: Whistle to Whistle')
 ;
 SELECT count(distinct audience_id) FROM vb_euros_iplayer;--5,261,821
+SELECT programme_title, count(*)
+FROM vb_euros_iplayer GROUP BY 1 ORDER BY  2 DESC;
 
---- Users going to iPlayer and visiting euros content
+--- Users going to Sounds and visiting euros content
 DROP TABLE IF EXISTS vb_euros_sounds;
 CREATE TABLE vb_euros_sounds as
 SELECT DISTINCT audience_id,
@@ -70,15 +73,18 @@ SELECT DISTINCT audience_id,
                 programme_title
 FROM audience.audience_activity_daily_summary_enriched
 WHERE destination = 'PS_SPORT'
-  AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
+  AND date_of_event BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_dates) AND (SELECT max_date FROM central_insights_sandbox.vb_dates)
   AND LENGTH(audience_id) = 43
-  and (episode_title ILIKE '%euro%' OR series_title ILIKE '%euro%' OR brand_title ILIKE '%euro%' OR
-       programme_title ILIKE '%euro%')
-  AND programme_title NOT ILIKE '%Euro Leagues%'
-  AND programme_title NOT ILIKE '%Europa League%'
-  AND programme_title NOT ILIKE '%European%'
-  AND episode_title NOT ILIKE '%European%'
-  AND pips_genre_level_1_names ILIKE '%Sport%'
+  AND (((episode_title ILIKE '%euro%' OR series_title ILIKE '%euro%' OR brand_title ILIKE '%euro%' OR
+         programme_title ILIKE '%euro%')
+    AND programme_title NOT ILIKE '%Euro Leagues%'
+    AND programme_title NOT ILIKE '%Europa League%'
+    AND programme_title NOT ILIKE '%European%'
+    AND episode_title NOT ILIKE '%European%'
+    AND pips_genre_level_1_names ILIKE '%Sport%')
+    OR
+       page_name ILIKE '%football.european_championship%'
+      OR page_name ILIKE 'sport.football.page')
 ;
 SELECT count(distinct audience_id) FROM vb_euros_sport;--2,942,210
 
@@ -139,7 +145,7 @@ DELETE FROM vb_euros_crossover WHERE products_used = '8';
 
 SELECT *  FROM vb_euros_crossover ORDER BY audience_id limit 10;
 
-SELECT count(distinct audience_id) FROM vb_euros_crossover;--7,405,657
+SELECT count(distinct audience_id) FROM vb_euros_crossover;--9,356,653
 
 -- See what combination of products are used for people who consumed Euros on at least one platform
 SELECT products_used,
@@ -149,13 +155,13 @@ SELECT products_used,
        count(distinct audience_id) as users,
        round(100 * users::double precision / (SELECT count(*)
                                               FROM vb_euros_crossover
-                                              WHERE (iplayer = TRUE OR sounds = TRUE or sport = TRUE) AND age_group = '16 to 34')::double precision,
+                                              WHERE (iplayer = TRUE OR sounds = TRUE or sport = TRUE) )::double precision,
              1)                    as perc
 FROM vb_euros_crossover
 WHERE (iplayer = TRUE
    OR sounds = TRUE
    or sport = TRUE)
-AND age_group = '16 to 34'
+--AND age_group = '16 to 34'
 GROUP BY 1, 2, 3, 4
 ORDER BY products_used
 ;
@@ -178,16 +184,26 @@ FROM all_hids a
          LEFT JOIN sport d on a.audience_id = d.audience_id
 ORDER BY a.audience_id
 ;
-SELECT CASE
-           WHEN sport = TRUE AND iplayer = TRUE AND sounds = TRUE THEN '1_all'
-           WHEN sport = TRUE AND iplayer = TRUE AND sounds = FALSE THEN '2_sport_iplayer'
-           WHEN sport = TRUE AND iplayer = FALSE AND sounds = TRUE THEN '3_sport_sounds'
-           WHEN sport = FALSE AND iplayer = TRUE AND sounds = TRUE THEN '4_iplayer_sounds'
-           WHEN sport = TRUE AND iplayer = FALSE AND sounds = FALSE THEN '5_sport_only'
-           WHEN sport = FALSE AND iplayer = TRUE AND sounds = FALSE THEN '6_iplayer_only'
-           WHEN sport = FALSE AND iplayer = FALSE AND sounds = TRUE THEN '7_sounds_only'
-           ELSE '8'
-           END                     as product_order,
+--Categorise users based on the products they use
+ALTER TABLE  vb_euros_crossover_test
+    add products_used varchar(40);
+UPDATE vb_euros_crossover_test
+set products_used = CASE
+                        WHEN sport = TRUE AND iplayer = TRUE AND sounds = TRUE THEN '1_all'
+                        WHEN sport = TRUE AND iplayer = TRUE AND sounds = FALSE THEN '2_sport_iplayer'
+                        WHEN sport = TRUE AND iplayer = FALSE AND sounds = TRUE THEN '3_sport_sounds'
+                        WHEN sport = FALSE AND iplayer = TRUE AND sounds = TRUE THEN '4_iplayer_sounds'
+                        WHEN sport = TRUE AND iplayer = FALSE AND sounds = FALSE THEN '5_sport_only'
+                        WHEN sport = FALSE AND iplayer = TRUE AND sounds = FALSE THEN '6_iplayer_only'
+                        WHEN sport = FALSE AND iplayer = FALSE AND sounds = TRUE THEN '7_sounds_only'
+                        ELSE '8'
+    END;
+-- Check product split
+SELECT products_used, count(distinct audience_id) FROM vb_euros_crossover_test GROUP BY 1 ORDER BY 1;
+--Remove people who went to no product
+DELETE FROM vb_euros_crossover_test WHERE products_used = '8';
+
+SELECT products_used,
        sport,
        iplayer,
        sounds,
@@ -202,7 +218,7 @@ WHERE (iplayer = TRUE
    or sport = TRUE)
 AND age_group = '16 to 34'
 GROUP BY 1, 2, 3, 4
-ORDER BY product_order
+ORDER BY products_used
 ;
 
 SELECT distinct date_of_event FROM audience.audience_activity_daily_summary_enriched
@@ -221,9 +237,73 @@ ORDER BY users DESC;
 SELECT count(*) FROM vb_euros_crossover;
 
 
+-- Get all the titles
+--- iplayer
+SELECT CASE
+           WHEN programme_title != episode_title THEN programme_title || ' - ' || episode_title
+           ELSE programme_title END as programme_title,
+       brand_title,
+       series_title,
+       episode_title,
+       count(distinct audience_id)
+FROM audience.audience_activity_daily_summary_enriched
+WHERE destination = 'PS_IPLAYER'
+  AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
+  AND LENGTH(audience_id) = 43
+  AND pips_genre_level_1_names ILIKE 'Sport%'
+  AND (programme_title ILIKE '%Euro 2020%' OR programme_title = 'Cristiano Ronaldo: Impossible to Ignore' OR
+       programme_title = 'Roberto Martinez: Whistle to Whistle')
+GROUP BY 1,2,3,4
+ORDER BY 1
+;
+--Sounds
+SELECT programme_title,
+       brand_title,
+       series_title,
+       episode_title,
+       count(distinct audience_id)
+FROM audience.audience_activity_daily_summary_enriched
+WHERE destination = 'PS_SOUNDS'
+  AND date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
+  AND LENGTH(audience_id) = 43
+  and (episode_title ILIKE '%euro%' OR series_title ILIKE '%euro%' OR brand_title ILIKE '%euro%' OR
+       programme_title ILIKE '%euro%')
+  AND programme_title NOT ILIKE '%Euro Leagues%'
+  AND programme_title NOT ILIKE '%Europa League%'
+  AND programme_title NOT ILIKE '%European%'
+  AND episode_title NOT ILIKE '%European%'
+  AND programme_title NOT ILIKE '%Women’s Euro 2022%'
+  AND pips_genre_level_1_names ILIKE '%Sport%'
+GROUP BY 1,2,3,4
+ORDER BY 1
+;
 
--- What content cross overs
---people in group 1 watch/read/list to X top 10
+
+--Sport AV content
+SELECT programme_title,
+       brand_title,
+       series_title,
+       episode_title,
+       count(distinct audience_id)
+FROM audience.audience_activity_daily_summary_enriched
+WHERE destination = 'PS_SPORT'
+  AND date_of_event BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_dates) AND (SELECT max_date FROM central_insights_sandbox.vb_dates)
+  AND LENGTH(audience_id) = 43
+  AND (((episode_title ILIKE '%euro%' OR series_title ILIKE '%euro%' OR brand_title ILIKE '%euro%' OR
+         programme_title ILIKE '%euro%')
+    AND programme_title NOT ILIKE '%Euro Leagues%'
+    AND programme_title NOT ILIKE '%Europa League%'
+    AND programme_title NOT ILIKE '%European%'
+    AND episode_title NOT ILIKE '%European%'
+    AND pips_genre_level_1_names ILIKE '%Sport%')
+    OR
+       page_name ILIKE '%football.european_championship%'
+      OR page_name ILIKE 'sport.football.page')
+GROUP BY 1,2,3,4
+ORDER BY 1
+;
+
+-- Sport pages
 
 
 -- FA Cup 2021 - We want to include the date range 10th May - 16th May
