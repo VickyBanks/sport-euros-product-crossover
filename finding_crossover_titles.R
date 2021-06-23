@@ -102,10 +102,5 @@ getwd()
 write.csv(top_content, "top_content_items.csv", row.names = FALSE)
 
 
-### re-cut the data to make comparisons easier
-
-
-
-
 
 
