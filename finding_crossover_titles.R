@@ -25,7 +25,8 @@ rm(redshift_username, user, redshift_password, password)
 vb_euros_crossover<- dbGetQuery(conn, "SELECT * FROM central_insights_sandbox.vb_euros_crossover;")
 vb_euros_iplayer<- dbGetQuery(conn, "SELECT * FROM central_insights_sandbox.vb_euros_iplayer;")
 vb_euros_sounds<- dbGetQuery(conn, "SELECT * FROM central_insights_sandbox.vb_euros_sounds;")
-vb_euros_sport<- dbGetQuery(conn, "SELECT * FROM central_insights_sandbox.vb_euros_sport;")
+vb_euros_sport_grouped<- dbGetQuery(conn, "SELECT * FROM central_insights_sandbox.vb_euros_sport_grouped;")
+
 
 product_groups<-vb_euros_crossover%>%select(products_used) %>%distinct()%>%arrange(products_used)
 product_groups 
@@ -76,16 +77,17 @@ sounds_titles<-
   arrange(desc(sounds_users)) %>% head(n=10)
 
 sport_titles<-
-  vb_euros_crossover %>%
+vb_euros_sport_grouped%>%
   filter(products_used == product_groups[row,]) %>%
-  select(audience_id)%>%
-  left_join(vb_euros_sport, by = 'audience_id') %>%
-  select(-age_group)%>%
-  group_by(programme_title)%>%
-  count()%>%
-  rename(sport_users = n)%>%
-  rename(sport_title = programme_title)%>%
-  arrange(desc(sport_users))%>% head(n=10)
+  rename(sport_title = title)%>%
+  rename(sport_users = users)%>%
+  arrange(desc(sport_users))%>%
+  select(-products_used)%>%
+  head(n=10)
+if(nrow(sport_titles) ==0) {
+  sport_titles <- data.frame(sport_title = c(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA),
+                             sport_users = c(NA,NA,NA,NA,NA,NA,NA,NA,NA,NA))
+}
 
 group_combined<-iplayer_titles %>% cbind(sounds_titles)%>%cbind(sport_titles)
 
@@ -100,7 +102,3 @@ top_content %>%View()
 
 getwd()
 write.csv(top_content, "top_content_items.csv", row.names = FALSE)
-
-
-
-
