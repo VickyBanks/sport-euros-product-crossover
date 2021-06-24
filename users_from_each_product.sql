@@ -70,8 +70,11 @@ SELECT DISTINCT audience_id,
                     WHEN age_range IN ('35-39', '40-44', '45-49', '50-54', '55-59', '60-64', '65-70', '>70')
                         THEN 'Over 35'
                     ELSE NULL END AS age_group,
-                programme_title
-FROM audience.audience_activity_daily_summary_enriched
+                CASE WHEN programme_title!= episode_title and episode_title IS NOT NULL and episode_title!='null'  THEN programme_title || ' - ' || episode_title  ELSE programme_title END as programme_title,
+                REGEXP_REPLACE(REGEXP_REPLACE(a.page_name,'-',' '),'other::homepage::sport.app.page','other::homepage::sport.page') AS page_name,
+                b.page_title
+FROM audience.audience_activity_daily_summary_enriched a
+LEFT JOIN vb_dist_page_names b on a.page_name = b.page_name
 WHERE destination = 'PS_SPORT'
   AND date_of_event BETWEEN (SELECT min_date FROM central_insights_sandbox.vb_dates) AND (SELECT max_date FROM central_insights_sandbox.vb_dates)
   AND LENGTH(audience_id) = 43
@@ -83,10 +86,27 @@ WHERE destination = 'PS_SPORT'
     AND episode_title NOT ILIKE '%European%'
     AND pips_genre_level_1_names ILIKE '%Sport%')
     OR
-       page_name ILIKE '%football.european_championship%'
-      OR page_name ILIKE 'sport.football.page')
+       a.page_name ILIKE '%football.european_championship%'
+    OR a.page_name ILIKE 'sport.football.page')
 ;
-SELECT count(distinct audience_id) FROM vb_euros_sport;--2,942,210
+
+ALTER TABLE vb_euros_sport ADD COLUMN title varchar(4000);
+ALTER TABLE vb_euros_sport ADD COLUMN content_type varchar(4000);
+
+UPDATE vb_euros_sport SET content_type = CASE WHEN programme_title IS NOT NULL THEN 'AV' ELSE 'page' END;
+UPDATE vb_euros_sport SET title = CASE WHEN programme_title IS NOT NULL THEN programme_title ELSE page_title END;
+
+ALTER TABLE vb_euros_sport DROP COLUMN programme_title;
+ALTER TABLE vb_euros_sport DROP COLUMN page_name;
+ALTER TABLE vb_euros_sport DROP COLUMN page_title;
+
+
+SELECT * FROM vb_euros_sport WHERE title ISNULL ORDER BY random() LIMIT 100;
+SELECT count(*) FROM vb_euros_sport WHERE title ISNULL ORDER BY random() LIMIT 100;
+
+SELECT count(distinct audience_id) FROM vb_euros_sport;--5,516,102
+SELECT count(*) FROM vb_euros_sport;--47,128,585
+
 
 -- Get all users seen to join all the others onto
 DROP TABLE IF EXISTS vb_euros_all_users;
@@ -221,6 +241,7 @@ GROUP BY 1, 2, 3, 4
 ORDER BY products_used
 ;
 
+--top_level_editorial_object
 SELECT distinct date_of_event FROM audience.audience_activity_daily_summary_enriched
 WHERE date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates);
 
@@ -304,6 +325,46 @@ ORDER BY 1
 ;
 
 -- Sport pages
+SELECT a.cps_id, a.page_title, a.page_section, count(distinct audience_id) as users
+FROM vb_nice_page_names a
+         LEFT JOIN audience.audience_activity_daily_summary_enriched b on a.page_name = b.page_name
+WHERE b.destination = 'PS_SPORT'
+  AND b.date_of_event BETWEEN (SELECT min_date FROM vb_dates) AND (SELECT max_date FROM vb_dates)
+  AND LENGTH(b.audience_id) = 43
+  AND (a.page_name ILIKE '%football.european_championship%'
+    OR a.page_name ILIKE 'sport.football.page')
+GROUP BY 1, 2, 3
+ORDER BY 4 desc;
 
+--The whole sport file is large to take into R. Need to only select the items likely to come out top
+DROP TABLE vb;
+CREATE temp table vb as
+with top_content as (
+    SELECT content_type, title, count(distinct audience_id) as users
+    FROM central_insights_sandbox.vb_euros_sport
+    GROUP BY 1, 2
+    HAVING users > 10000
+    ORDER BY 3 DESC)
+SELECT a.*
+FROM central_insights_sandbox.vb_euros_sport a
+         INNER JOIN top_content b on a.title = b.title
+;
+SELECT count(*) from vb;--46,959,916
+
+--LIMIT 10;--47,128,585
+
+---- Pre group the data so it's easier to go into R
+DROP TABLE IF EXISTS vb_euros_sport_grouped;
+CREATE TABLE vb_euros_sport_grouped AS
+with data_joined as (
+    SELECT a.audience_id, a.age_group, a.products_used, b.content_type || ' - ' || b.title as title
+    FROM vb_euros_crossover a
+             INNER JOIN vb_euros_sport b on a.audience_id = b.audience_id and a.age_group = b.age_group
+)
+SELECT products_used, title, count(audience_id) as users
+FROM data_joined
+GROUP BY 1,2
+ORDER BY users DESC
+;
 
 -- FA Cup 2021 - We want to include the date range 10th May - 16th May
